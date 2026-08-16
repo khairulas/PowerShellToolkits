@@ -1,0 +1,17 @@
+Windows Registry Editor Version 5.00
+
+; Adds "Open with Code" when you right-click ON a folder
+[HKEY_CLASSES_ROOT\Directory\shell\VSCode]
+@="Open with Code"
+"Icon"="\"C:\\Users\\Khairul\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe\""
+
+[HKEY_CLASSES_ROOT\Directory\shell\VSCode\command]
+@="\"C:\\Users\\Khairul\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe\" \"%1\""
+
+; Adds "Open with Code" when you right-click empty space INSIDE a folder
+[HKEY_CLASSES_ROOT\Directory\Background\shell\VSCode]
+@="Open with Code"
+"Icon"="\"C:\\Users\\Khairul\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe\""
+
+[HKEY_CLASSES_ROOT\Directory\Background\shell\VSCode\command]
+@="\"C:\\Users\\Khairul\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe\" \"%V\""
