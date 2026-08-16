@@ -1,8 +1,23 @@
+<#
+.SYNOPSIS
+    Compresses video files using FFmpeg (H.264/AAC) to reduce file size.
+.DESCRIPTION
+    Accepts a single video file or a folder and re-encodes video(s) into a
+    "Compressed" subfolder using a selectable CRF (quality) level.
+.PARAMETER Path
+    Path to a video file or a folder containing videos.
+.PARAMETER CompressionLevel
+    "1" = Low compression (best quality), "2" = Medium (recommended),
+    "3" = High compression (smallest file).
+.EXAMPLE
+    .\CompressVideo.ps1
+    Prompts interactively for a path and compression level.
+#>
+
 function Compress-Video {
     param (
         [Parameter(Mandatory=$true)]
         [string]$Path,
-        
         [string]$CompressionLevel = "2"
     )
 
@@ -27,6 +42,8 @@ function Compress-Video {
     }
 
     $item = Get-Item $Path
+    $successCount = 0
+    $failCount = 0
 
     # Helper script block to process individual files
     $processFile = {
@@ -38,62 +55,77 @@ function Compress-Video {
         }
 
         $outputFile = Join-Path $outputDirectory "$($file.BaseName)_compressed.mp4"
+
         Write-Host "Compressing: $($file.Name)..." -ForegroundColor Cyan
 
         <#
-           FFMPEG COMPRESSION FLAGS:
-           -vcodec libx264 : standard, highly efficient H.264 video codec
-           -crf $targetCrf : controls compression quality
-           -preset slow     : spends more CPU time optimizing file size efficiency
-           -acodec aac     : standard audio compression
-           -b:a 128k        : sets audio bitrate to clean, efficient 128kbps
-           -pix_fmt yuv420p : maintains broad playback compatibility (e.g. PowerPoint)
+        FFMPEG COMPRESSION FLAGS:
+        -vcodec libx264 : standard, highly efficient H.264 video codec
+        -crf $targetCrf : controls compression quality
+        -preset slow    : spends more CPU time optimizing file size efficiency
+        -acodec aac     : standard audio compression
+        -b:a 128k       : sets audio bitrate to clean, efficient 128kbps
+        -pix_fmt yuv420p: maintains broad playback compatibility (e.g. PowerPoint)
         #>
         ffmpeg -i "$($file.FullName)" `
-               -vcodec libx264 `
-               -crf $targetCrf `
-               -preset slow `
-               -acodec aac `
-               -b:a 128k `
-               -pix_fmt yuv420p `
-               -y "$outputFile" 2>$null
+            -vcodec libx264 `
+            -crf $targetCrf `
+            -preset slow `
+            -acodec aac `
+            -b:a 128k `
+            -pix_fmt yuv420p `
+            -y "$outputFile" 2>$null
 
-        if (Test-Path $outputFile) {
+        # FIX: previously "success" was judged only by Test-Path on the output
+        # file, so a failed or partial FFmpeg run that still wrote a (possibly
+        # 0-byte) file was reported as a successful compression. Now we also
+        # check FFmpeg's own exit code and that the output actually has size.
+        if ($LASTEXITCODE -eq 0 -and (Test-Path $outputFile) -and (Get-Item $outputFile).Length -gt 0) {
             $origSize = [math]::Round(($file.Length / 1MB), 2)
             $newSize = [math]::Round(((Get-Item $outputFile).Length / 1MB), 2)
-            $saved = [math]::Round((($origSize - $newSize) / $origSize) * 100, 1)
-
+            $saved = if ($origSize -gt 0) { [math]::Round((($origSize - $newSize) / $origSize) * 100, 1) } else { 0 }
             Write-Host "  Done -> Original: ${origSize}MB | Compressed: ${newSize}MB | Saved: ${saved}%" -ForegroundColor Green
+            return $true
+        } else {
+            Write-Host "  Failed to compress $($file.Name) (FFmpeg exit code: $LASTEXITCODE)" -ForegroundColor Red
+            if (Test-Path $outputFile) { Remove-Item $outputFile -Force -ErrorAction SilentlyContinue }
+            return $false
         }
     }
 
     # 3. Process Directory vs Single File
     if ($item.PSIsContainer) {
         $files = Get-ChildItem -Path $Path -Include "*.mp4","*.mov","*.mkv","*.avi" -Recurse
+
         if ($files.Count -eq 0) {
             Write-Host "No compatible video files found in target folder." -ForegroundColor Yellow
             return
         }
-        
+
         Write-Host "`nFound $($files.Count) video(s). Starting batch compression..." -ForegroundColor Yellow
+
         foreach ($file in $files) {
-            & $processFile $file $crf
+            if (& $processFile $file $crf) { $successCount++ } else { $failCount++ }
         }
+
+        $summaryColor = if ($failCount -eq 0) { "Green" } else { "Yellow" }
+        Write-Host "`nBatch complete: $successCount succeeded, $failCount failed." -ForegroundColor $summaryColor
     } else {
-        & $processFile $item $crf
+        if (& $processFile $item $crf) { $successCount++ } else { $failCount++ }
     }
 }
 
 # --- User Interface ---
 Clear-Host
 Write-Host "=== Video Size Reducer ===" -ForegroundColor Yellow
+
 $inputPath = Read-Host "Enter file or folder path"
 $cleanPath = $inputPath.Trim('"')
 
 Write-Host "`nSelect Compression Level:" -ForegroundColor White
-Write-Host "1) Low Compression    (Higher Quality, Larger File)"
+Write-Host "1) Low Compression (Higher Quality, Larger File)"
 Write-Host "2) Medium Compression (Balanced - Recommended)"
-Write-Host "3) High Compression   (Smallest File, Lower Quality)"
+Write-Host "3) High Compression (Smallest File, Lower Quality)"
 $levelChoice = Read-Host "Choice (1-3)"
 
 if ($cleanPath) {
